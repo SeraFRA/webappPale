@@ -63,7 +63,22 @@
   function getWorkout(id) { return getWorkouts().find((w) => w.id === id) || null; }
 
   // --- Sessioni -----------------------------------------------------------
-  function getSessions() { ensureSeed(); return read(KEYS.sessions, []); }
+  // Migrazione: le vecchie voci "piatte" (peso/rip/sensazione unici) diventano
+  // una lista di serie del numero previsto dall'esercizio, con gli stessi valori.
+  function normalizeEntry(e) {
+    if (Array.isArray(e.series) && e.series.length) return e;
+    return Object.assign({}, e, {
+      series: D.defaultSeries(e.sets, e.weight, e.reps, e.feeling),
+    });
+  }
+  function normalizeSession(s) {
+    return Object.assign({}, s, { entries: (s.entries || []).map(normalizeEntry) });
+  }
+
+  function getSessions() {
+    ensureSeed();
+    return read(KEYS.sessions, []).map(normalizeSession);
+  }
   function saveSessions(list) { write(KEYS.sessions, list); return list; }
 
   function sortedSessions() {

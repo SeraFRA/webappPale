@@ -54,9 +54,9 @@
     },
   ];
 
-  const SEED_SETTINGS = { weightIncrement: 2.5, unit: 'kg' };
+  const SEED_SETTINGS = { unit: 'kg' };
 
-  // Peso di fallback per i bottoni +/- a tap breve (long-press usa quello configurabile)
+  // Peso di fallback per i bottoni +/- (il valore resta comunque editibile da tastiera)
   const FIXED_STEP = 2.5;
 
   function uid(prefix) {
@@ -93,13 +93,38 @@
     return new Date(y, m - 1, d).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
   }
 
-  // Volume di una voce: serie x rip x peso
-  function entryVolume(weight, reps, sets) {
-    return (Number(weight) || 0) * (Number(reps) || 0) * (Number(sets) || 0);
+  // Volume di una voce: somma (peso x rip) di ogni serie registrata.
+  // Fallback per il vecchio formato "piatto" (peso/rip unici moltiplicati per le serie).
+  function entryVolume(entry) {
+    if (Array.isArray(entry.series) && entry.series.length) {
+      return entry.series.reduce((sum, s) => sum + (Number(s.weight) || 0) * (Number(s.reps) || 0), 0);
+    }
+    return (Number(entry.weight) || 0) * (Number(entry.reps) || 0) * (Number(entry.sets) || 0);
   }
 
   function sessionVolume(session) {
-    return (session.entries || []).reduce((sum, e) => sum + entryVolume(e.weight, e.reps, e.sets), 0);
+    return (session.entries || []).reduce((sum, e) => sum + entryVolume(e), 0);
+  }
+
+  // Media dei pesi delle serie di una voce (per grafici e KPI); null se non ci sono serie.
+  function avgSeriesWeight(entry) {
+    if (!Array.isArray(entry.series) || !entry.series.length) return null;
+    const ws = entry.series.map((s) => Number(s.weight) || 0);
+    return ws.reduce((a, b) => a + b, 0) / ws.length;
+  }
+
+  // Crea "count" serie uguali (usato per la migrazione del vecchio formato e per i default).
+  function defaultSeries(count, weight, reps, feeling) {
+    return Array.from({ length: Math.max(1, count || 3) }, () => ({
+      weight: Number(weight) || 0,
+      reps: Number(reps) || 0,
+      feeling: feeling || 3,
+    }));
+  }
+
+  // Formatta un peso per la UI italiana (virgola decimale)
+  function fmtKg(v) {
+    return String(Math.round((Number(v) || 0) * 100) / 100).replace('.', ',');
   }
 
   return {
@@ -117,5 +142,8 @@
     formatDateIt,
     entryVolume,
     sessionVolume,
+    avgSeriesWeight,
+    defaultSeries,
+    fmtKg,
   };
 });

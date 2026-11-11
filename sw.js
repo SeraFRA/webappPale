@@ -1,7 +1,7 @@
 /* sw.js — service worker cache-first con precache di tutti i file dell'app. */
 'use strict';
 
-const CACHE = 'gymlog-sw-v1';
+const CACHE = 'gymlog-sw-v2';
 
 const ASSETS = [
   './',

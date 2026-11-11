@@ -48,10 +48,11 @@ python test\run_tests.py
 ```
 
 La suite avvia da sola un server locale e verifica: caricamento senza errori console,
-salvataggio sessione e persistenza dopo reload, tap (+2,5 kg) vs long-press (incremento
-configurabile), storico con eliminazione, 3 grafici non vuoti con 2+ sessioni, KPI,
-roundtrip export/import JSON, service worker attivo e pagina offline dalla cache,
-manifest e icone valide, nessun path assoluto, flusso completo delle 4 tab.
+salvataggio sessione e persistenza dopo reload, bottoni ± (salto fisso 2,5 kg) e peso
+ scritto da tastiera, storico con eliminazione, 3 grafici non vuoti con 2+ sessioni, KPI,
+roundtrip export/import JSON, migrazione del vecchio formato voci "piatte" in serie,
+service worker attivo e pagina offline dalla cache, manifest e icone valide, nessun
+path assoluto, flusso completo delle 4 tab, assenza di scroll orizzontale.
 
 ## Pubblicare su GitHub Pages (passo passo da Windows)
 
@@ -90,24 +91,29 @@ Non serve `npm`, non serve build: tutti i percorsi sono relativi (`./...`).
 
 ## Modello dati (localStorage, chiavi versionate)
 
-- `gym.v1.settings` — `{ weightIncrement: 2.5, unit: "kg" }`
+- `gym.v1.settings` — `{ unit: "kg" }` (e `weightIncrement` se presente da versioni precedenti)
 - `gym.v1.workouts` — schede: `{ id, name, exercises: [{ id, name, sets, reps, weight }] }`
 - `gym.v1.sessions` — sessioni: `{ id, date: "YYYY-MM-DD", ts, workoutId, workoutName,
-  entries: [{ exerciseId, name, sets, weight, reps, feeling: 1-5 }] }`
+  entries: [{ exerciseId, name, sets, series: [{ weight, reps, feeling: 1-5 }] }] }`
+  — per ogni esercizio si registrano **peso, ripetizioni e fatica per ognuna delle serie previste**
   (una sessione per giorno: salvando di nuovo si modifica quella del giorno)
 
 Esempio di export/import: `Impostazioni → Esporta dati (JSON)` produce
 `gymlog-export-YYYY-MM-DD.json` con `{ app, version, exportedAt, settings, workouts, sessions }`.
+Le vecchie sessioni salvate con il formato "piatto" (peso/rip unici) vengono migrate
+ automaticamente in serie allo stesso valore.
 
 ## Scelte implementative
 
 - **Scheda del giorno**: giorni di allenamento mar/gio/sab/dom; la proposta alterna
   la scheda rispetto all'ultima sessione registrata (Spinta ↔ Tirata+gambe), con
   fallback iniziale mar→Tirata+gambe, gio→Spinta, sab/dom→Tirata+gambe.
-  negli altri giorni propone l'ultima scheda usata.
-- **Peso**: tap su ± = 2,5 kg fissi; long-press (450 ms) = incremento configurabile
-  in Impostazioni (default 2,5 kg).
-- **Volume** di una sessione = Σ (serie × ripetizioni × peso) delle voci.
+  Negli altri giorni propone l'ultima scheda usata.
+- **Peso**: editibile sia da tastiera (input numerico, su iOS apre il tastierino
+  decimale) che con i bottoni ± (salto fisso 2,5 kg). Nessun long-press.
+- **Volume** di una sessione = Σ (peso × ripetizioni) di ogni serie registrata.
+- **Grafico peso**: per ogni sessione usa la media dei pesi delle serie dell'esercizio
+  selezionato. **Fatica media**: media di tutte le fatica (1-5) registrate.
 - **Grafici**: disegnati su `<canvas>` con gestione del devicePixelRatio.
-- **Service worker**: precache di tutti i file in `gymlog-sw-v1`, cache-first,
+- **Service worker**: precache di tutti i file in `gymlog-sw-v2`, cache-first,
   fallback offline sulla shell per le navigazioni.

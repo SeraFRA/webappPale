@@ -8,11 +8,10 @@
 
   const state = {
     today: D.dateStr(new Date()),
-    draft: null,          // bozza della sessione di oggi (array voci)
+    draft: null,          // bozza della sessione di oggi (array voci con serie)
     draftWorkoutId: null, // scheda scelta per oggi
     statMonth: D.monthStr(new Date()),
     statExerciseId: null,
-    detailId: null,
   };
 
   // --- Helper DOM ----------------------------------------------------------
@@ -29,6 +28,12 @@
     (children || []).forEach((c) => { if (c) n.appendChild(c); });
     return n;
   }
+
+  function parseNum(v) {
+    const n = parseFloat(String(v).replace(',', '.'));
+    return isNaN(n) ? 0 : n;
+  }
+  function fmtNum(v) { return String(Math.round((Number(v) || 0) * 100) / 100); }
 
   let toastTimer = null;
   function toast(msg) {
@@ -96,19 +101,30 @@
   window.addEventListener('hashchange', render);
 
   // --- Bozza sessione di oggi ------------------------------------------------
+  // Ogni voce: { exerciseId, name, sets, series: [{ weight, reps, feeling }] }
   function buildDraft(workoutId) {
     const workout = S.getWorkout(workoutId);
     const todaySession = S.getSessionByDate(state.today);
     return workout.exercises.map((ex) => {
-      let weight = ex.weight, reps = ex.reps, feeling = 3;
-      if (todaySession) {
-        const e = todaySession.entries.find((x) => x.exerciseId === ex.id);
-        if (e) { weight = e.weight; reps = e.reps; feeling = e.feeling; }
-      } else {
-        const last = S.lastEntryFor(ex.id, state.today);
-        if (last) { weight = last.weight; reps = last.reps; feeling = last.feeling; }
+      const count = Math.max(1, ex.sets || 3);
+      const src = todaySession
+        ? todaySession.entries.find((x) => x.exerciseId === ex.id)
+        : S.lastEntryFor(ex.id, state.today);
+      const series = [];
+      for (let i = 0; i < count; i++) {
+        let w = Number(ex.weight) || 0, r = Number(ex.reps) || 0, f = 3;
+        if (src) {
+          if (src.series && src.series[i]) {
+            w = Number(src.series[i].weight) || w;
+            r = Number(src.series[i].reps) || r;
+            f = src.series[i].feeling || 3;
+          } else if (typeof src.weight === 'number') {
+            w = src.weight || w; r = src.reps || r; f = src.feeling || 3;
+          }
+        }
+        series.push({ weight: w, reps: r, feeling: f });
       }
-      return { exerciseId: ex.id, name: ex.name, sets: ex.sets, weight, reps, feeling };
+      return { exerciseId: ex.id, name: ex.name, sets: count, series };
     });
   }
 
@@ -142,91 +158,101 @@
       sel,
     ]));
 
-    // card esercizi
-    state.draft.forEach((entry, i) => {
+    // card esercizi con blocchi per serie
+    state.draft.forEach((entry) => {
       const ex = workout.exercises.find((e) => e.id === entry.exerciseId);
-      const last = todaySession ? null : S.lastEntryFor(entry.exerciseId, state.today);
+      const last = S.lastEntryFor(entry.exerciseId, state.today);
       const card = el('div', { class: 'card exercise' });
 
-      const head = el('div', { class: 'ex-head' }, [
+      card.appendChild(el('div', { class: 'ex-head' }, [
         el('span', { class: 'ex-name', text: entry.name }),
-        el('span', { class: 'ex-planned', text: (ex ? ex.sets : entry.sets) + ' x ' + (ex ? ex.reps : entry.reps) + ' prev.' }),
-      ]);
-      card.appendChild(head);
-      card.appendChild(el('div', {
-        class: 'ex-last',
-        text: todaySession ? 'Valori di oggi (modificabili)' : (last ? 'Ultima volta: ' + last.weight + ' kg x ' + last.reps : 'Nessuna registrazione precedente'),
-      }));
-
-      // stepper peso
-      card.appendChild(stepperRow('Peso (kg)', entry.weight, (v) => { entry.weight = v; }, 'kg'));
-      // stepper ripetizioni
-      card.appendChild(stepperRow('Ripetizioni', entry.reps, (v) => { entry.reps = v; }, '', true));
-      //感觉
-      const feels = el('div', { class: 'feelings' });
-      D.FEELINGS.forEach((f) => {
-        feels.appendChild(el('button', {
-          class: 'feel' + (entry.feeling === f.value ? ' selected' : ''),
-          type: 'button',
-          title: f.label,
-          text: f.emoji,
-          onclick: () => { entry.feeling = f.value; render(); },
+        el('span', { class: 'ex-planned', text: (ex ? ex.sets : entry.sets) + ' x ' + (ex ? ex.reps : '') + ' prev.' }),
+      ]));
+      if (todaySession) {
+        card.appendChild(el('div', { class: 'ex-last', text: 'Valori di oggi (modificabili, serie per serie)' }));
+      } else if (last && last.series) {
+        card.appendChild(el('div', {
+          class: 'ex-last',
+          text: 'Ultima: ' + last.series.map((s) => D.fmtKg(s.weight) + ' kg x ' + s.reps).join(' · '),
         }));
+      } else {
+        card.appendChild(el('div', { class: 'ex-last', text: 'Nessuna registrazione precedente' }));
+      }
+
+      entry.series.forEach((sr, si) => {
+        card.appendChild(serieBlock(entry, sr, si));
       });
-      card.appendChild(el('div', { class: 'stepper-row' }, [el('span', { class: 'lbl', text: 'Sensazione' }), feels]));
 
       view.appendChild(card);
     });
 
     // salva
-    const saveBtn = el('button', {
+    view.appendChild(el('button', {
       class: 'btn primary big',
       type: 'button',
       text: todaySession ? 'Salva modifiche' : 'Salva sessione',
       onclick: saveToday,
-    });
-    view.appendChild(saveBtn);
+    }));
   }
 
-  // Riga stepper con tap (passo fisso 2,5) e long-press (passo configurabile)
-  function stepperRow(label, value, onChange, suffix, isReps) {
-    const valEl = el('span', { class: 'val', text: value + (suffix ? ' ' + suffix : '') });
-    function apply(delta, longPress) {
-      const settings = S.getSettings();
-      let step;
-      if (isReps) step = 1;
-      else step = longPress ? (settings.weightIncrement || D.FIXED_STEP) : D.FIXED_STEP;
-      let v = Number(value) + delta * step;
-      if (isReps) v = Math.round(v);
-      v = Math.max(0, v);
-      if (!isReps) v = Math.round(v * 100) / 100;
-      onChange(v);
-      valEl.textContent = v + (suffix ? ' ' + suffix : '');
-    }
-    function stepBtn(sign) {
-      const b = el('button', { class: 'btn', type: 'button', text: sign > 0 ? '+' : '−', 'aria-label': (sign > 0 ? 'Aumenta ' : 'Diminuisci ') + label });
-      let timer = null, fired = false;
-      b.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        fired = false;
-        timer = setTimeout(() => { fired = true; apply(sign, true); }, 450);
+  // Blocco di una serie: peso (input + bottoni ±2,5), ripetizioni (input), fatica (emoji 1-5).
+  // Tutti i controlli aggiornano la bozza senza re-render (niente perdita di focus/tastiera).
+  function serieBlock(entry, sr, si) {
+    const block = el('div', { class: 'serie' });
+    block.appendChild(el('div', { class: 'serie-tag', text: 'Serie ' + (si + 1) }));
+
+    // peso: [−][input][+]
+    const wInput = el('input', {
+      type: 'number', class: 'w-input', inputmode: 'decimal', step: '0.5', min: '0',
+      value: fmtNum(sr.weight), 'aria-label': 'Peso serie ' + (si + 1) + ' (kg)',
+    });
+    wInput.addEventListener('change', () => {
+      sr.weight = Math.max(0, Math.round(parseNum(wInput.value) * 100) / 100);
+      wInput.value = fmtNum(sr.weight);
+    });
+    const minus = el('button', {
+      class: 'btn step', type: 'button', text: '−',
+      'aria-label': 'Diminuisci peso serie ' + (si + 1),
+      onclick: () => { sr.weight = Math.max(0, Math.round((sr.weight - D.FIXED_STEP) * 100) / 100); wInput.value = fmtNum(sr.weight); },
+    });
+    const plus = el('button', {
+      class: 'btn step', type: 'button', text: '+',
+      'aria-label': 'Aumenta peso serie ' + (si + 1),
+      onclick: () => { sr.weight = Math.max(0, Math.round((sr.weight + D.FIXED_STEP) * 100) / 100); wInput.value = fmtNum(sr.weight); },
+    });
+    block.appendChild(el('div', { class: 'row-peso' }, [
+      minus, wInput, el('span', { class: 'lbl-unit', text: 'kg' }), plus,
+    ]));
+
+    // rip + fatica
+    const rInput = el('input', {
+      type: 'number', class: 'r-input', inputmode: 'numeric', step: '1', min: '0',
+      value: String(sr.reps), 'aria-label': 'Ripetizioni serie ' + (si + 1),
+    });
+    rInput.addEventListener('change', () => {
+      sr.reps = Math.max(0, Math.round(parseNum(rInput.value)));
+      rInput.value = String(sr.reps);
+    });
+    const feels = el('div', { class: 'feelings compact' });
+    D.FEELINGS.forEach((f) => {
+      const fb = el('button', {
+        class: 'feel' + (sr.feeling === f.value ? ' selected' : ''),
+        type: 'button', text: f.emoji,
+        title: 'Fatica ' + f.value + '/5', 'aria-label': 'Fatica ' + f.value + ' su 5, serie ' + (si + 1),
       });
-      const end = () => { clearTimeout(timer); if (!fired) apply(sign, false); };
-      b.addEventListener('pointerup', end);
-      b.addEventListener('pointercancel', () => { clearTimeout(timer); });
-      b.addEventListener('pointerleave', () => { clearTimeout(timer); });
-      b.addEventListener('contextmenu', (e) => e.preventDefault());
-      return b;
-    }
-    const row = el('div', { class: 'stepper-row' }, [
-      el('span', { class: 'lbl', text: label }),
-      el('div', { class: 'stepper' }, [stepBtn(-1), valEl, stepBtn(1)]),
-    ]);
-    if (isReps) {
-      const reset = el('button', { class: 'btn small ghost', type: 'button', text: 'reset', onclick: () => { onChange(0); valEl.textContent = '0'; } });
-      row.appendChild(reset);
-    }
-    return row;
+      fb.addEventListener('click', () => {
+        sr.feeling = f.value;
+        // aggiorna solo le classi dei bottoni di questo blocco (no re-render)
+        feels.querySelectorAll('.feel').forEach((b, k) => {
+          b.classList.toggle('selected', D.FEELINGS[k].value === f.value);
+        });
+      });
+      feels.appendChild(fb);
+    });
+    block.appendChild(el('div', { class: 'row-rip' }, [
+      el('label', { text: 'Rip' }), rInput, feels,
+    ]));
+    return block;
   }
 
   function saveToday() {
@@ -239,8 +265,14 @@
       workoutId: workout.id,
       workoutName: workout.name,
       entries: state.draft.map((e) => ({
-        exerciseId: e.exerciseId, name: e.name, sets: e.sets,
-        weight: Number(e.weight) || 0, reps: Number(e.reps) || 0, feeling: e.feeling,
+        exerciseId: e.exerciseId,
+        name: e.name,
+        sets: e.sets,
+        series: e.series.map((s) => ({
+          weight: Number(s.weight) || 0,
+          reps: Number(s.reps) || 0,
+          feeling: s.feeling || 3,
+        })),
       })),
     };
     S.upsertSession(session);
@@ -257,7 +289,6 @@
       view.appendChild(el('div', { class: 'empty-state', text: 'Nessuna sessione ancora. Vai su "Oggi" e allenati!' }));
       return;
     }
-    // raggruppa per mese
     const byMonth = new Map();
     sessions.forEach((s) => {
       const m = s.date.slice(0, 7);
@@ -267,15 +298,14 @@
     for (const [m, list] of byMonth) {
       view.appendChild(el('div', { class: 'section-title', text: D.monthLabel(m) }));
       list.forEach((s) => {
-        const row = el('button', {
+        view.appendChild(el('button', {
           class: 'session-row', type: 'button',
           onclick: () => { location.hash = '#/storico/' + s.id; },
         }, [
           el('span', { class: 's-date', text: D.formatDateIt(s.date) }),
           el('span', { class: 's-info', text: s.workoutName + ' — ' + s.entries.length + ' esercizi' }),
           el('span', { class: 's-vol', text: Math.round(D.sessionVolume(s)).toLocaleString('it-IT') + ' kg' }),
-        ]);
-        view.appendChild(row);
+        ]));
       });
     }
   }
@@ -288,21 +318,18 @@
     view.appendChild(el('button', { class: 'btn ghost', type: 'button', text: '← Torna allo storico', onclick: () => { location.hash = '#/storico'; } }));
 
     const card = el('div', { class: 'card mt' });
-    const table = el('table', { class: 'detail-table' });
-    table.appendChild(el('tr', {}, [
-      el('th', { text: 'Esercizio' }), el('th', { text: 'Serie' }), el('th', { text: 'Peso' }), el('th', { text: 'Rip' }), el('th', { text: '' }),
-    ]));
-    s.entries.forEach((e) => {
-      const f = D.FEELINGS.find((x) => x.value === e.feeling);
-      table.appendChild(el('tr', {}, [
-        el('td', { text: e.name }),
-        el('td', { text: String(e.sets) + 'x' + e.reps }),
-        el('td', { text: e.weight + ' kg' }),
-        el('td', { text: String(e.reps) }),
-        el('td', { text: f ? f.emoji : '' }),
-      ]));
+    s.entries.forEach((e, i) => {
+      const ex = el('div', { class: 'detail-ex' });
+      ex.appendChild(el('b', { text: e.name }));
+      (e.series || []).forEach((sr, j) => {
+        const f = D.FEELINGS.find((x) => x.value === sr.feeling);
+        ex.appendChild(el('div', {
+          class: 'detail-serie',
+          text: 'S' + (j + 1) + ' · ' + D.fmtKg(sr.weight) + ' kg x ' + sr.reps + (f ? ' · ' + f.emoji : ''),
+        }));
+      });
+      card.appendChild(ex);
     });
-    card.appendChild(table);
     card.appendChild(el('div', { class: 'muted mt', text: 'Volume totale: ' + Math.round(D.sessionVolume(s)).toLocaleString('it-IT') + ' kg' }));
     view.appendChild(card);
 
@@ -333,27 +360,27 @@
     const month = state.statMonth;
     const sessions = S.sortedSessions().filter((s) => s.date.slice(0, 7) === month).slice().sort((a, b) => a.date.localeCompare(b.date));
 
-    // controlli mese
     const monthLabel = el('span', { class: 'month-label', text: D.monthLabel(month) });
-    const nav = el('div', { class: 'month-nav' }, [
-      navBtn('‹', () => { state.statMonth = D.shiftMonth(month, -1); render(); }),
-      monthLabel,
-      navBtn('›', () => { state.statMonth = D.shiftMonth(month, 1); render(); }),
-    ]);
-    view.appendChild(el('div', { class: 'stat-controls' }, [nav]));
+    view.appendChild(el('div', { class: 'stat-controls' }, [
+      el('div', { class: 'month-nav' }, [
+        navBtn('‹', () => { state.statMonth = D.shiftMonth(month, -1); render(); }),
+        monthLabel,
+        navBtn('›', () => { state.statMonth = D.shiftMonth(month, 1); render(); }),
+      ]),
+    ]));
 
     // selettore esercizio per il grafico peso
     const exOptions = allExerciseOptions();
     if (!state.statExerciseId || !exOptions.find((e) => e.id === state.statExerciseId)) {
-      // default: esercizio più frequente nel mese, altrimenti il primo
+      let best = null, bestN = -1;
       const count = new Map();
       sessions.forEach((s) => s.entries.forEach((e) => count.set(e.exerciseId, (count.get(e.exerciseId) || 0) + 1)));
-      let best = null, bestN = -1;
       count.forEach((n, id) => { if (n > bestN) { bestN = n; best = id; } });
       state.statExerciseId = best || (exOptions[0] && exOptions[0].id) || null;
     }
-    const selWrap = el('div', { class: 'card' }, []);
-    selWrap.appendChild(el('div', { class: 'sub', text: 'Esercizio per il grafico del peso:' }));
+    const selWrap = el('div', { class: 'card' }, [
+      el('div', { class: 'sub', text: 'Esercizio per il grafico del peso:' }),
+    ]);
     const sel = el('select', { 'aria-label': 'Esercizio' });
     exOptions.forEach((e) => sel.appendChild(el('option', { value: e.id, text: e.name, ...(e.id === state.statExerciseId ? { selected: '' } : {}) })));
     sel.addEventListener('change', () => { state.statExerciseId = sel.value; render(); });
@@ -362,34 +389,38 @@
 
     // KPI
     const totalVolume = sessions.reduce((a, s) => a + D.sessionVolume(s), 0);
-    const kpiGrid = el('div', { class: 'kpi-grid' }, [
+    view.appendChild(el('div', { class: 'kpi-grid' }, [
       kpi(String(sessions.length), 'Sessioni'),
       kpi(Math.round(totalVolume).toLocaleString('it-IT') + ' kg', 'Volume totale'),
       kpi(improvementPct(sessions), 'Peso principale'),
-    ]);
-    view.appendChild(kpiGrid);
+    ]));
 
-    // grafico 1: peso nel tempo (linee)
+    // grafico 1: peso (media serie) nel tempo
     view.appendChild(chartCard('Peso nel tempo — ' + ((exOptions.find((e) => e.id === state.statExerciseId) || {}).name || ''), (canvas) => {
       const pts = [];
       sessions.forEach((s) => {
         const e = s.entries.find((x) => x.exerciseId === state.statExerciseId);
-        if (e) pts.push({ label: s.date.slice(8), value: e.weight });
+        const v = e ? D.avgSeriesWeight(e) : null;
+        if (v != null) pts.push({ label: s.date.slice(8), value: Math.round(v * 10) / 10 });
       });
       return C.drawLine(canvas, pts, { color: '#4f8cff' });
     }));
 
     // grafico 2: volume per sessione (barre)
-    view.appendChild(chartCard('Volume per sessione (serie x rip x peso)', (canvas) => {
+    view.appendChild(chartCard('Volume per sessione (peso x rip per serie)', (canvas) => {
       const bars = sessions.map((s) => ({ label: s.date.slice(8), value: D.sessionVolume(s) }));
       return C.drawBar(canvas, bars, { color: '#35d07f' });
     }));
 
-    // grafico 3:感觉 media nel tempo (linee)
-    view.appendChild(chartCard('Sensazione media (1-5)', (canvas) => {
+    // grafico 3: fatica media nel tempo (linee)
+    view.appendChild(chartCard('Fatica media (1-5)', (canvas) => {
       const pts = sessions.map((s) => {
-        const avg = s.entries.length ? s.entries.reduce((a, e) => a + e.feeling, 0) / s.entries.length : 0;
-        return { label: s.date.slice(8), value: avg };
+        const fs = [];
+        s.entries.forEach((e) => {
+          if (Array.isArray(e.series)) e.series.forEach((sr) => fs.push(sr.feeling || 3));
+          else if (e.feeling) fs.push(e.feeling);
+        });
+        return { label: s.date.slice(8), value: fs.length ? fs.reduce((a, b) => a + b, 0) / fs.length : 3 };
       });
       return C.drawLine(canvas, pts, { color: '#f5b83d' });
     }));
@@ -406,19 +437,17 @@
     card.appendChild(el('h4', { text: title }));
     const canvas = el('canvas', {});
     card.appendChild(canvas);
-    // disegna dopo che il canvas è in DOM (serve clientWidth)
     requestAnimationFrame(() => {
       const ok = drawFn(canvas);
       if (!ok) {
-        const empty = el('div', { class: 'chart-empty', text: 'Nessun dato per questo mese' });
-        card.appendChild(empty);
+        card.appendChild(el('div', { class: 'chart-empty', text: 'Nessun dato per questo mese' }));
         canvas.style.display = 'none';
       }
     });
     return card;
   }
 
-  // Esercizio "principale": più frequente nel mese; improvement = (ultimo - primo)/primo
+  // Esercizio "principale": più frequente nel mese; improvement = (ultimo - primo)/primo sulle medie serie
   function improvementPct(sessions) {
     if (!sessions.length) return '—';
     const count = new Map();
@@ -429,7 +458,8 @@
     const pts = [];
     sessions.forEach((s) => {
       const e = s.entries.find((x) => x.exerciseId === mainId);
-      if (e) pts.push(e.weight);
+      const v = e ? D.avgSeriesWeight(e) : null;
+      if (v != null) pts.push(v);
     });
     if (pts.length < 2 || pts[0] === 0) return '—';
     const pct = ((pts[pts.length - 1] - pts[0]) / pts[0]) * 100;
@@ -437,20 +467,11 @@
   }
 
   // --- Impostazioni --------------------------------------------------------------
-  function renderSettings(view) {
-    setHeader('Impostazioni', 'Schede, preferenze e dati');
+  // Ogni modifica alle schede invalida la bozza di oggi (per rileggere gli esercizi).
+  function invalidateDraft() { state.draft = null; }
 
-    // incremento peso
-    const settings = S.getSettings();
-    const incInput = el('input', { type: 'number', min: '0.5', step: '0.5', value: String(settings.weightIncrement), 'aria-label': 'Incremento peso (long-press)' });
-    incInput.addEventListener('change', () => {
-      const v = parseFloat(incInput.value);
-      if (v > 0) { S.updateSettings({ weightIncrement: v }); toast('Incremento salvato: ' + v + ' kg'); }
-    });
-    view.appendChild(el('div', { class: 'card' }, [
-      el('div', { class: 'sub', text: 'Incremento peso per il long-press sui bottoni ± (il tap breve resta 2,5 kg):' }),
-      el('div', { class: 'set-row' }, [el('label', { text: 'Incremento (kg)' }), incInput]),
-    ]));
+  function renderSettings(view) {
+    setHeader('Impostazioni', 'Schede e dati');
 
     // schede
     view.appendChild(el('div', { class: 'section-title', text: 'Le mie schede' }));
@@ -460,7 +481,7 @@
       nameInput.addEventListener('change', () => {
         const list = S.getWorkouts();
         list[wi].name = nameInput.value.trim() || w.name;
-        S.saveWorkouts(list);
+        S.saveWorkouts(list); invalidateDraft();
         toast('Scheda rinominata');
       });
       card.appendChild(el('div', { class: 'card-head' }, [
@@ -475,8 +496,8 @@
               buttons: [
                 { label: 'Annulla', class: 'ghost' },
                 { label: 'Elimina', class: 'danger', onClick: () => {
-                  const list = S.getWorkouts().filter((x) => x.id !== w.id);
-                  S.saveWorkouts(list);
+                  S.saveWorkouts(S.getWorkouts().filter((x) => x.id !== w.id));
+                  invalidateDraft();
                   toast('Scheda eliminata');
                   render();
                 } },
@@ -501,13 +522,13 @@
             e.sets = Math.max(1, parseInt(setsI.value, 10) || e.sets);
             e.reps = Math.max(1, parseInt(repsI.value, 10) || e.reps);
             e.weight = Math.max(0, parseFloat(weightI.value) || 0);
-            S.saveWorkouts(list);
+            S.saveWorkouts(list); invalidateDraft();
           });
         });
         delB.addEventListener('click', () => {
           const list = S.getWorkouts();
           list[wi].exercises.splice(ei, 1);
-          S.saveWorkouts(list);
+          S.saveWorkouts(list); invalidateDraft();
           toast('Esercizio rimosso');
           render();
         });
@@ -520,7 +541,7 @@
         onclick: () => {
           const list = S.getWorkouts();
           list[wi].exercises.push({ id: D.uid('ex'), name: 'Nuovo esercizio', sets: 3, reps: 10, weight: 0 });
-          S.saveWorkouts(list);
+          S.saveWorkouts(list); invalidateDraft();
           render();
         },
       }));
@@ -532,7 +553,7 @@
       onclick: () => {
         const list = S.getWorkouts();
         list.push({ id: D.uid('w'), name: 'Nuova scheda', exercises: [] });
-        S.saveWorkouts(list);
+        S.saveWorkouts(list); invalidateDraft();
         render();
       },
     }));

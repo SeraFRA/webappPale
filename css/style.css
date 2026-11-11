@@ -87,10 +87,6 @@ body {
 .exercise .ex-planned { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
 .exercise .ex-last { font-size: 12px; color: var(--accent); margin: 2px 0 10px; }
 
-.stepper-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
-.stepper-row .lbl { font-size: 12px; color: var(--text-dim); width: 64px; flex: none; }
-
-.stepper { display: flex; align-items: center; gap: 6px; flex: 1; }
 .btn {
   min-width: 44px;
   min-height: 44px;
@@ -118,22 +114,35 @@ body {
 .btn.primary:active { filter: brightness(1.15); }
 .btn.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
 .btn.ghost { background: transparent; }
-.stepper .val {
+
+/* --- Serie (home) ------------------------------------------------------- */
+.serie { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
+.serie-tag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); margin-bottom: 8px; }
+.row-peso { display: flex; align-items: center; gap: 8px; }
+.row-peso .btn.step { min-width: 48px; min-height: 44px; font-size: 20px; }
+.w-input {
   flex: 1;
+  min-height: 44px;
   text-align: center;
-  font-variant-numeric: tabular-nums;
   font-weight: 700;
   font-size: 16px;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-input);
-  border-radius: 12px;
-  border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  padding: 8px 6px;
+}
+.lbl-unit { font-size: 12px; color: var(--text-dim); }
+.row-rip { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.row-rip > label { font-size: 12px; color: var(--text-dim); width: 22px; flex: none; }
+.r-input {
+  width: 64px;
+  min-height: 40px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 15px;
+  padding: 6px 4px;
 }
 
 .feelings { display: flex; gap: 6px; margin-top: 8px; }
+.feelings.compact { flex: 1; gap: 4px; margin-top: 0; }
 .feelings .feel {
   flex: 1;
   min-height: 44px;
@@ -142,7 +151,9 @@ body {
   border: 1px solid var(--border);
   background: var(--bg-input);
   cursor: pointer;
+  touch-action: manipulation;
 }
+.feelings.compact .feel { min-height: 40px; font-size: 18px; border-radius: 10px; }
 .feelings .feel.selected { background: var(--accent-soft); border-color: var(--accent); }
 
 /* --- Bottoni grandi / azioni ------------------------------------------- */
@@ -172,6 +183,11 @@ body {
 .detail-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .detail-table th { text-align: left; font-size: 12px; color: var(--text-dim); padding: 6px 4px; border-bottom: 1px solid var(--border); }
 .detail-table td { padding: 8px 4px; border-bottom: 1px solid var(--border); }
+
+.detail-ex { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.detail-ex:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+.detail-ex b { font-size: 15px; }
+.detail-serie { font-size: 13px; color: var(--text-dim); padding: 4px 0; font-variant-numeric: tabular-nums; }
 
 /* --- Statistiche -------------------------------------------------------- */
 .stat-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
