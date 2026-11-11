@@ -137,7 +137,7 @@
     if (!parsed || typeof parsed !== 'object') return { ok: false, error: 'Formato non riconosciuto' };
     const workouts = Array.isArray(parsed.workouts) ? parsed.workouts : null;
     const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : null;
-    if (!workouts || !sessions) return { ok: false, error: ' mancano workouts o sessions' };
+    if (!workouts || !sessions) return { ok: false, error: 'mancano workouts o sessions' };
     for (const w of workouts) {
       if (!w.id || !w.name || !Array.isArray(w.exercises)) return { ok: false, error: 'scheda non valida: ' + (w.name || w.id) };
     }
